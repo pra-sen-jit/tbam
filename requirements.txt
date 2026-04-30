@@ -1,0 +1,15 @@
+sudo apt update
+sudo apt install -y apacheds
+
+
+sudo systemctl start apacheds
+sudo systemctl status apacheds
+
+
+
+sudo systemctl status apacheds && nc -vz 127.0.0.1 10389
+
+
+
+go mod init tbam
+go mod tidy
