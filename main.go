@@ -3,28 +3,31 @@ package main
 import (
 	"fmt"
 	"time"
-
-	"tbam/ldapool"
+	"tbam/connection_pool"
+	"tbam/worker_pool"
 )
 
 func main() {
-	pool := ldapool.New(10, "ldap://localhost:10389", "uid=admin,ou=system", "secret")
+	cPool := ldapool.New(10, "ldap://localhost", "admin", "pass")
+	wPool := workerpool.New(50, 10000)
 
-	fmt.Println("exection\n")
+	for i := 1; i <= 10000; i++ {
+		userID := fmt.Sprintf("User-%d", i)
 
-	go func() {
-		conn, err := pool.Borrow()
+		wPool.Submit(func() {
+			conn, err := cPool.Borrow()
+			if err != nil {
+				fmt.Println("Failed to get connection")
+				cPool.Return(nil)
+				return
+			}
 
-		if err != nil {
-			fmt.Println("Error Connecting\n")
-			pool.Return(nil)
-			return
-		}
+			fmt.Printf("Updating LDAP for %s\n", userID)
+			time.Sleep(50 * time.Millisecond)
 
-		fmt.Println("Borrowed and Connected\n")
-		pool.Return(conn)
-	}()
+			cPool.Return(conn)
+		})
+	}
 
-	time.Sleep(1 * time.Second)
-	fmt.Println("done")
+	time.Sleep(10 * time.Second)
 }
