@@ -3,29 +3,29 @@ package workerpool
 type Task func()
 
 type Pool struct {
-	taskQueue chan Task
 	workerCount int
+	taskQueue chan Task
 }
 
-func New(workerCount int, queueSize int) *Pool {
+func New(workerCount , queueSize int) *Pool {
 	p := &Pool{
-		taskQueue: make(chan Task, queueSize),
 		workerCount: workerCount,
+		taskQueue: make(chan Task, queueSize),
 	}
 
-
-	for i := 1; i <= workerCount; i++ {
-		go p.startWorker(i)
+	for i := 0; i < workerCount; i++ {
+		go p.startWorker()
 	}
 
 	return p
 }
 
-func (p *Pool) startWorker(id int) {
+func (p *Pool) startWorker() {
 	for task := range p.taskQueue {
-		task() 
+		task()
 	}
 }
+
 
 func (p *Pool) Submit(t Task) {
 	p.taskQueue <- t
