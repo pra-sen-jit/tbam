@@ -1,7 +1,8 @@
 package models
 
-// ExpiringAccess represents an identity that has time-bound access scheduled for revocation.
-type ExpiringAccess struct {
-	DN               string // Distinguished Name
-	AccessExpiryTime int64  // Unix timestamp of when the access expires
+type AccessGrant struct {
+	UserDN           string
+	GroupDN          string // The specific group to revoke
+	AccessExpiryTime int64
+	RawAttribute     string // The exact string (e.g., "cn=Group...|12345")
 }

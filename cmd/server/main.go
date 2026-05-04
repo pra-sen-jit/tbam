@@ -30,19 +30,19 @@ func main() {
 	}
 	defer ldapClient.Close()
 
-	// Test the Search
-	users, err := ldapClient.FetchExpiringUsers()
+	// --- PHASE 1: Fetch the Access Grants ---
+	grants, err := ldapClient.FetchExpiringGrants()
 	if err != nil {
-		log.Printf("Error fetching users: %v", err)
+		log.Printf("Error fetching access grants: %v", err)
 	} else {
-		for _, u := range users {
-			log.Printf("-> User: %s | Expires At: %d", u.DN, u.AccessExpiryTime)
+		for _, g := range grants {
+			log.Printf("-> User: %s | Group: %s | Expires At: %d", g.UserDN, g.GroupDN, g.AccessExpiryTime)
 		}
 	}
 
-	// Start the timers
-	if len(users) > 0 {
-		scheduler.ScheduleRevocations(users, ldapClient)
+	// --- PHASE 2: Start the timers ---
+	if len(grants) > 0 {
+		scheduler.ScheduleRevocations(grants, ldapClient)
 	} else {
 		log.Println("No expiring access found for today.")
 	}
@@ -50,7 +50,6 @@ func main() {
 	// ----------------------------------------------------------------------
 
 	// Setup Graceful Shutdown
-	// Created a channel to listen for OS interrupt signals (like Ctrl+C in terminal)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 

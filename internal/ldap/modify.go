@@ -5,33 +5,38 @@ import (
 	"log"
 
 	"github.com/go-ldap/ldap/v3"
+
+	"tbam/internal/models"
 )
 
-// RevokeAccess completely removes the user from the privileged group and clears their expiry timer.
-func (c *Client) RevokeAccess(userDN string) error {
-	log.Printf("Executing LDAP Revocation for: %s", userDN)
+// RevokeSpecificAccess removes the user from the specific privileged group and clears just that grant's timer.
+func (c *Client) RevokeSpecificAccess(grant models.AccessGrant) error {
+	log.Printf("Executing Targeted LDAP Revocation for: %s from Group: %s", grant.UserDN, grant.GroupDN)
 
-	// --- 1. REMOVE FROM PRIVILEGED GROUP ---
-	groupDN := "cn=PrivilegedGroup,ou=Groups,dc=example,dc=com"
-	groupModifyReq := ldap.NewModifyRequest(groupDN, nil)
-	groupModifyReq.Delete("member", []string{userDN})
+	// --- 1. REMOVE FROM SPECIFIC PRIVILEGED GROUP ---
+	groupModifyReq := ldap.NewModifyRequest(grant.GroupDN, nil)
+	groupModifyReq.Delete("member", []string{grant.UserDN})
+	
 	err := c.Conn.Modify(groupModifyReq)
 	if err != nil {
 		// Note: Error code 16 means "No Such Attribute" (they are already not in the group).
-		return fmt.Errorf("failed to remove user from group %s: %w", groupDN, err)
+		return fmt.Errorf("failed to remove user from group %s: %w", grant.GroupDN, err)
 	}
-	log.Printf("-> Step 1 Complete: Kicked out of PrivilegedAdmins group")
+	log.Printf("-> Step 1 Complete: Kicked out of group: %s", grant.GroupDN)
 
-	// --- 2. CLEAR THE TIMER ATTRIBUTE ---
-	userModifyReq := ldap.NewModifyRequest(userDN, nil)
-	userModifyReq.Delete("employeeNumber", []string{}) // Our hijacked timestamp attribute
+	// --- 2. SURGICALLY CLEAR THE SPECIFIC TIMER ATTRIBUTE ---
+	userModifyReq := ldap.NewModifyRequest(grant.UserDN, nil)
+	
+	// Notice we are passing the EXACT RawAttribute string (e.g. "cn=Group...|123456789")
+	// LDAP will search the businessCategory array and delete ONLY this matching string.
+	userModifyReq.Delete("businessCategory", []string{grant.RawAttribute})
 
 	err = c.Conn.Modify(userModifyReq)
 	if err != nil {
-		return fmt.Errorf("failed to clear expiry attribute for user %s: %w", userDN, err)
+		return fmt.Errorf("failed to clear specific expiry attribute for user %s: %w", grant.UserDN, err)
 	}
-	log.Printf("-> Step 2 Complete: Stripped time-bound timer attribute")
+	log.Printf("-> Step 2 Complete: Stripped targeted time-bound timer attribute")
 
-	log.Printf("✅ SUCCESS: Total Privileged Access cleanly revoked for %s", userDN)
+	log.Printf("✅ SUCCESS: Specific Privileged Access cleanly revoked for %s", grant.UserDN)
 	return nil
 }

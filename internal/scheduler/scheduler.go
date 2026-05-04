@@ -8,39 +8,38 @@ import (
 	"tbam/internal/models"
 )
 
-// ScheduleRevocations takes a list of users and sets an in-memory timer for each one.
-func ScheduleRevocations(users []models.ExpiringAccess, client *ldap.Client) {
-	log.Printf("Scheduling %d access revocations...", len(users))
+// ScheduleRevocations takes a list of access grants and sets an in-memory timer for each one.
+func ScheduleRevocations(grants []models.AccessGrant, client *ldap.Client) {
+	log.Printf("Scheduling %d specific access revocations...", len(grants))
 
-	for _, user := range users {
+	for _, grant := range grants {
 		// 1. Convert the raw Unix integer into a Go time.Time object
-		expiryTime := time.Unix(user.AccessExpiryTime, 0)
+		expiryTime := time.Unix(grant.AccessExpiryTime, 0)
 		
 		// 2. Calculate exactly how much time is left from 'Right Now'
 		timeRemaining := time.Until(expiryTime)
-		targetDN := user.DN
+
+		// Capture the specific grant for the goroutine closure to prevent data races
+		targetGrant := grant
 
 		// 3. Handle edge cases: What if the access is already expired?
 		if timeRemaining <= 0 {
-			log.Printf("[URGENT] Access for %s is already expired! Flagging for immediate revocation.", user.DN)
-			// Trigger immediate revocation
-			err := client.RevokeAccess(targetDN)
+			log.Printf("[URGENT] Grant for %s to group %s is already expired! Flagging for immediate revocation.", targetGrant.UserDN, targetGrant.GroupDN)
+			err := client.RevokeSpecificAccess(targetGrant)
 			if err != nil {
-				log.Printf("❌ ERROR revoking access for %s: %v", targetDN, err)
+				log.Printf("❌ ERROR revoking specific access for %s: %v", targetGrant.UserDN, err)
 			}
 			continue
 		}
 
-		log.Printf("Timer set: %s will be revoked in %v", user.DN, timeRemaining)
+		log.Printf("Timer set: %s will be removed from %s in %v", targetGrant.UserDN, targetGrant.GroupDN, timeRemaining)
 
 		// 4. Set the Alarm
 		time.AfterFunc(timeRemaining, func() {
-			// --- THIS CODE RUNS IN THE FUTURE ---
-			// Go automatically spawns a new background goroutine when this timer hits 0.
-			log.Printf("⏰ ALARM RINGING! Time to revoke access for: %s", targetDN)
-			err := client.RevokeAccess(targetDN)
+			log.Printf("⏰ ALARM RINGING! Time to revoke access for: %s from %s", targetGrant.UserDN, targetGrant.GroupDN)
+			err := client.RevokeSpecificAccess(targetGrant)
 			if err != nil {
-				log.Printf("❌ ERROR revoking access for %s: %v", targetDN, err)
+				log.Printf("❌ ERROR revoking specific access for %s: %v", targetGrant.UserDN, err)
 			}
 		})
 	}
