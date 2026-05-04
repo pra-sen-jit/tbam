@@ -3,10 +3,11 @@ package ldap
 import (
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 
 	"github.com/go-ldap/ldap/v3"
-	
+
 	"tbam/internal/models"
 )
 
@@ -17,7 +18,7 @@ func (c *Client) FetchExpiringUsers() ([]models.ExpiringAccess, error) {
 
 	// 1. Define the search request
 	searchRequest := ldap.NewSearchRequest(
-		"dc=nextgen,dc=local", // Base DN
+		os.Getenv("LDAP_BASE_DN"), // Base DN
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		"(employeeNumber=*)", // The Filter: "Has this attribute"
 		[]string{"dn", "employeeNumber"}, // The attributes we want returned

@@ -9,6 +9,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"tbam/internal/ldap"
+	"tbam/internal/scheduler"
 )
 
 func main() {
@@ -39,13 +40,21 @@ func main() {
 		}
 	}
 
+	// Start the timers
+	if len(users) > 0 {
+		scheduler.ScheduleRevocations(users, ldapClient)
+	} else {
+		log.Println("No expiring access found for today.")
+	}
+
+	// ----------------------------------------------------------------------
+
 	// Setup Graceful Shutdown
 	// Created a channel to listen for OS interrupt signals (like Ctrl+C in terminal)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	log.Println("Service is running. Press Ctrl+C to shut down.")
-
 	<-quit
 	log.Println("Shutdown signal received. Exiting gracefully...")
 }
