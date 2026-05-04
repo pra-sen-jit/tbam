@@ -8,13 +8,15 @@ import (
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
-
 	"tbam/internal/models"
 )
 
 // FetchExpiringGrants queries the LDAP directory for any user with the businessCategory attribute
 // businessCategory holds an array of strings formatted as "GroupDN|Timestamp"
 func (c *Client) FetchExpiringGrants() ([]models.AccessGrant, error) {
+	conn, _ := c.Borrow()
+	defer c.Return(conn)
+
 	log.Println("Searching LDAP for active time-bound access grants...")
 
 	// 1. Define the search request
@@ -27,7 +29,7 @@ func (c *Client) FetchExpiringGrants() ([]models.AccessGrant, error) {
 	)
 
 	// 2. Execute the search
-	result, err := c.Conn.Search(searchRequest)
+	result, err := conn.Search(searchRequest)
 	if err != nil {
 		return nil, fmt.Errorf("LDAP search failed: %w", err)
 	}

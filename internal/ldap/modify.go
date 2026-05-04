@@ -5,19 +5,21 @@ import (
 	"log"
 
 	"github.com/go-ldap/ldap/v3"
-
 	"tbam/internal/models"
 )
 
 // RevokeSpecificAccess removes the user from the specific privileged group and clears just that grant's timer.
 func (c *Client) RevokeSpecificAccess(grant models.AccessGrant) error {
+	conn, _ := c.Borrow()
+	defer c.Return(conn)
+
 	log.Printf("Executing Targeted LDAP Revocation for: %s from Group: %s", grant.UserDN, grant.GroupDN)
 
 	// --- 1. REMOVE FROM SPECIFIC PRIVILEGED GROUP ---
 	groupModifyReq := ldap.NewModifyRequest(grant.GroupDN, nil)
 	groupModifyReq.Delete("member", []string{grant.UserDN})
 	
-	err := c.Conn.Modify(groupModifyReq)
+	err := conn.Modify(groupModifyReq)
 	if err != nil {
 		// Note: Error code 16 means "No Such Attribute" (they are already not in the group).
 		return fmt.Errorf("failed to remove user from group %s: %w", grant.GroupDN, err)
@@ -31,7 +33,7 @@ func (c *Client) RevokeSpecificAccess(grant models.AccessGrant) error {
 	// LDAP will search the businessCategory array and delete ONLY this matching string.
 	userModifyReq.Delete("businessCategory", []string{grant.RawAttribute})
 
-	err = c.Conn.Modify(userModifyReq)
+	err = conn.Modify(userModifyReq)
 	if err != nil {
 		return fmt.Errorf("failed to clear specific expiry attribute for user %s: %w", grant.UserDN, err)
 	}

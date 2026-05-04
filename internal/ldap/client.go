@@ -1,48 +1,71 @@
 package ldap
 
 import (
-	"fmt"
 	"log"
 	"os"
 
 	"github.com/go-ldap/ldap/v3"
 )
 
-// Client holds our active LDAP connection
 type Client struct {
-	Conn *ldap.Conn
+	pool chan *ldap.Conn
+	url  string
+	user string
+	pass string
 }
 
-// Connect initializes the connection and authenticates (Binds) to the server
-func Connect() (*Client, error) {
+// InitPool creates a connection pool of the specified size
+func InitPool(size int) (*Client, error) {
 	url := os.Getenv("LDAP_URL")
-	bindDN := os.Getenv("LDAP_BIND_DN")
-	password := os.Getenv("LDAP_PASSWORD")
+	user := os.Getenv("LDAP_BIND_DN")
+	pass := os.Getenv("LDAP_PASSWORD")
 
-	log.Printf("Attempting to connect to LDAP at %s...", url)
-
-	// 1. Dial the LDAP server
-	l, err := ldap.DialURL(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial LDAP server: %w", err)
+	c := &Client{
+		pool: make(chan *ldap.Conn, size),
+		url:  url,
+		user: user,
+		pass: pass,
 	}
 
-	// 2. Authenticate using the Admin credentials (Bind)
-	err = l.Bind(bindDN, password)
-	if err != nil {
-		l.Close() // Always clean up if the bind fails
-		return nil, fmt.Errorf("failed to bind to LDAP server: %w", err)
+	// Pre-fill the pool with nil connections to represent available capacity
+	for i := 0; i < size; i++ {
+		c.pool <- nil
 	}
-
-	log.Println("Successfully connected and bound to LDAP!")
-
-	return &Client{Conn: l}, nil
+	
+	log.Printf("LDAP Connection pool initialized with %d workers.", size)
+	return c, nil
 }
 
-// Close cleanly shuts down the connection when the app stops
-func (c *Client) Close() {
-	if c.Conn != nil {
-		log.Println("Closing LDAP connection...")
-		c.Conn.Close()
+// Borrow retrieves a connection or dials a new one if necessary
+func (c *Client) Borrow() (*ldap.Conn, error) {
+	conn := <-c.pool
+
+	if conn == nil || conn.IsClosing() {
+		newConn, err := ldap.DialURL(c.url)
+		if err != nil {
+			return nil, err
+		}
+		err = newConn.Bind(c.user, c.pass)
+		if err != nil {
+			newConn.Close()
+			c.pool <- nil
+			return nil, err
+		}
+		return newConn, nil
+	}
+	return conn, nil
+}
+
+// Return puts the connection back into the pool
+func (c *Client) Return(conn *ldap.Conn) {
+	c.pool <- conn
+}
+
+func (c *Client) CloseAll() {
+	close(c.pool)
+	for conn := range c.pool {
+		if conn != nil {
+			conn.Close()
+		}
 	}
 }
