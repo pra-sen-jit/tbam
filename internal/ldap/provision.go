@@ -3,7 +3,7 @@ package ldap
 import (
 	"fmt"
 	"log"
-	// "os"
+	"os"
 	"time"
 
 	"tbam/internal/models"
@@ -51,7 +51,7 @@ func (c *Client) GrantAccess(req models.UserRequest) (*models.AccessGrant, error
 
 	// 3. Find the User DN based on UID
 	userSearch := ldap.NewSearchRequest(
-		"dc=example,dc=com",
+		os.Getenv("LDAP_BASE_DN"),
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		fmt.Sprintf("(&(objectClass=person)(uid=%s))", req.UID),
 		[]string{"dn"}, nil,
