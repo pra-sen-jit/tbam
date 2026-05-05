@@ -7,46 +7,32 @@ import (
 	"syscall"
 
 	"github.com/joho/godotenv"
+	"github.com/nats-io/nats.go"
 	"tbam/internal/api"
 	"tbam/internal/ldap"
-	"tbam/internal/scheduler"
 	"tbam/internal/worker"
 )
 
 func main() {
-	log.Println("Starting NextGen IGA Unified Time-Bound Access Service...")
 	godotenv.Load(".env")
 
-	// 1. Initialize LDAP Connection Pool (e.g., 10 concurrent connections)
 	ldapClient, err := ldap.InitPool(10)
 	if err != nil {
-		log.Fatalf("Fatal error starting service: %v", err)
+		log.Fatalf("Error: %v", err)
 	}
 	defer ldapClient.CloseAll()
 
-	// 2. Initialize Worker Pool (e.g., 20 goroutines, queue size 100)
-	workerPool := worker.NewPool(20, 100)
-
-	// --- PHASE 1: BOOT-UP RECOVERY ---
-	// Catch any access grants we missed while the server was offline
-	grants, err := ldapClient.FetchExpiringGrants()
+	nc, err := nats.Connect(os.Getenv("NATS_URL"))
 	if err != nil {
-		log.Printf("Error fetching access grants: %v", err)
-	} else if len(grants) > 0 {
-		scheduler.ScheduleRevocations(grants, ldapClient)
-	} else {
-		log.Println("No active expirations found on boot.")
+		log.Fatalf("Error: %v", err)
 	}
+	defer nc.Close()
 
-	// --- PHASE 2: START GIN API ---
-	// We run this in a goroutine so it doesn't block our graceful shutdown channel
-	go api.StartServer(workerPool, ldapClient)
+	workerPool := worker.NewPool(150, 500)
 
-	// --- GRACEFUL SHUTDOWN ---
+	go api.StartNatsListener(nc, workerPool, ldapClient)
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	log.Println("Service is running and listening for provisioning requests on port 5000. Press Ctrl+C to shut down.")
 	<-quit
-	log.Println("Shutdown signal received. Exiting gracefully...")
 }

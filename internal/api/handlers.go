@@ -1,44 +1,46 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
-	"net/http"
-
-	"github.com/gin-gonic/gin"
+	"github.com/nats-io/nats.go"
 	"tbam/internal/ldap"
 	"tbam/internal/models"
-	"tbam/internal/scheduler"
 	"tbam/internal/worker"
 )
 
-func StartServer(wPool *worker.Pool, ldapClient *ldap.Client) {
-	r := gin.Default()
+type NatsEnvelope struct {
+	RequestID string             `json:"requestId"`
+	UserID    string             `json:"userId"`
+	Body      models.UserRequest `json:"body"`
+}
 
-	r.POST("/provision", func(c *gin.Context) {
-		var req models.UserRequest
-
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
-			return
-		}
-
-		// Submit the heavy lifting to the background worker pool
+func StartNatsListener(nc *nats.Conn, wPool *worker.Pool, ldapClient *ldap.Client) {
+	nc.Subscribe("access.grant", func(msg *nats.Msg) {
 		wPool.Submit(func() {
-			// 1. Provision the Access in LDAP
-			grant, err := ldapClient.GrantAccess(req)
+			var env NatsEnvelope
+			json.Unmarshal(msg.Data, &env)
+
+			grant, err := ldapClient.PrepareGrantCommand(env.Body)
+			
 			if err != nil {
-				fmt.Printf("❌ Failed to provision %s: %v\n", req.UID, err)
+				reply, _ := json.Marshal(map[string]interface{}{
+					"ok": false, "status": 500, "message": err.Error(),
+				})
+				msg.Respond(reply)
 				return
 			}
 
-			// 2. IMMEDIATELY SET THE DEPROVISIONING TIMER
-			// We pass a slice containing our single new grant to your existing scheduler
-			scheduler.ScheduleRevocations([]models.AccessGrant{*grant}, ldapClient)
+			commandStr := fmt.Sprintf("COMMAND:GRANT|USER:%s|GROUP:%s|EXPIRY:%d", 
+				grant.UserDN, grant.GroupDN, grant.AccessExpiryTime)
+
+			nc.Publish("ldap.console.execute", []byte(commandStr))
+
+			reply, _ := json.Marshal(map[string]interface{}{
+				"ok": true, "status": 200, "message": "Command Generated",
+				"data": grant,
+			})
+			msg.Respond(reply)
 		})
-
-		// Return fast to the UI
-		c.JSON(http.StatusAccepted, gin.H{"status": "queued", "user": req.UID})
 	})
-
-	r.Run(":5000")
 }
