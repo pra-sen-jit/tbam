@@ -4,13 +4,15 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
-	"github.com/joho/godotenv"
-	"github.com/nats-io/nats.go"
 	"tbam/internal/api"
 	"tbam/internal/ldap"
 	"tbam/internal/worker"
+
+	"github.com/joho/godotenv"
+	"github.com/nats-io/nats.go"
 )
 
 func main() {
@@ -18,17 +20,18 @@ func main() {
 
 	ldapClient, err := ldap.InitPool(10)
 	if err != nil {
-		log.Fatalf("Error: %v", err)
+		log.Fatal(err)
 	}
 	defer ldapClient.CloseAll()
 
 	nc, err := nats.Connect(os.Getenv("NATS_URL"))
 	if err != nil {
-		log.Fatalf("Error: %v", err)
+		log.Fatal(err)
 	}
 	defer nc.Close()
 
-	workerPool := worker.NewPool(150, 500)
+	workerCount, _ := strconv.Atoi(os.Getenv("WORKER_COUNT"))
+	workerPool := worker.NewPool(workerCount, 500)
 
 	go api.StartNatsListener(nc, workerPool, ldapClient)
 

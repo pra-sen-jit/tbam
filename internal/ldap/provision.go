@@ -4,12 +4,9 @@ import (
 	"fmt"
 	"os"
 	"time"
-
 	"tbam/internal/models"
-
 	"github.com/go-ldap/ldap/v3"
 )
-
 
 func (c *Client) PrepareGrantCommand(req models.UserRequest) (*models.AccessGrant, error) {
 	conn, err := c.Borrow()
@@ -34,7 +31,7 @@ func (c *Client) PrepareGrantCommand(req models.UserRequest) (*models.AccessGran
 	)
 	ps, err := conn.Search(privSearch)
 	if err != nil || len(ps.Entries) == 0 {
-		return nil, fmt.Errorf("group not found")
+		return nil, fmt.Errorf("privilege group not found")
 	}
 	privGroupDN := ps.Entries[0].DN
 
@@ -48,10 +45,9 @@ func (c *Client) PrepareGrantCommand(req models.UserRequest) (*models.AccessGran
 	if err != nil || len(us.Entries) == 0 {
 		return nil, fmt.Errorf("user not found")
 	}
-	userDN := us.Entries[0].DN
 
 	return &models.AccessGrant{
-		UserDN:           userDN,
+		UserDN:           us.Entries[0].DN,
 		GroupDN:          privGroupDN,
 		AccessExpiryTime: expiryUnix,
 		RawAttribute:     fmt.Sprintf("%s|%d", privGroupDN, expiryUnix),
