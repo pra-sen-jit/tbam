@@ -17,7 +17,7 @@ func (c *Client) RevokeSpecificAccess(grant models.AccessGrant) error {
 
 	// --- 1. REMOVE FROM SPECIFIC PRIVILEGED GROUP ---
 	groupModifyReq := ldap.NewModifyRequest(grant.GroupDN, nil)
-	groupModifyReq.Delete("member", []string{grant.UserDN})
+	groupModifyReq.Delete("uniqueMember", []string{grant.UserDN})
 	
 	err := conn.Modify(groupModifyReq)
 	if err != nil {

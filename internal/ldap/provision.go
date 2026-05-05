@@ -3,7 +3,7 @@ package ldap
 import (
 	"fmt"
 	"log"
-	// "os"
+	"os"
 	"time"
 
 	"tbam/internal/models"
@@ -33,7 +33,7 @@ func (c *Client) GrantAccess(req models.UserRequest) (*models.AccessGrant, error
 	privSearch := ldap.NewSearchRequest(
 		req.PrivilegeAccess,
 		ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false,
-		"(objectClass=groupOfNames)",
+		"(objectClass=groupOfUniqueNames)",
 		[]string{"dn"}, nil,
 	)
 	// Use this code block if only Group CN arrives in JSON request body
@@ -51,7 +51,7 @@ func (c *Client) GrantAccess(req models.UserRequest) (*models.AccessGrant, error
 
 	// 3. Find the User DN based on UID
 	userSearch := ldap.NewSearchRequest(
-		"dc=example,dc=com",
+		os.Getenv("LDAP_BASE_DN"),
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		fmt.Sprintf("(&(objectClass=person)(uid=%s))", req.UID),
 		[]string{"dn"}, nil,
@@ -66,7 +66,7 @@ func (c *Client) GrantAccess(req models.UserRequest) (*models.AccessGrant, error
 	
 	// A. Add User to Group
 	groupModifyReq := ldap.NewModifyRequest(privGroupDN, nil)
-	groupModifyReq.Add("member", []string{userDN})
+	groupModifyReq.Add("uniqueMember", []string{userDN})
 	if err := conn.Modify(groupModifyReq); err != nil {
 		return nil, fmt.Errorf("failed to add user to group: %w", err)
 	}
