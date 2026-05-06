@@ -14,7 +14,6 @@ type Client struct {
 	pass string
 }
 
-// InitPool creates a connection pool of the specified size
 func InitPool(size int) (*Client, error) {
 	url := os.Getenv("LDAP_URL")
 	user := os.Getenv("LDAP_BIND_DN")
@@ -27,38 +26,47 @@ func InitPool(size int) (*Client, error) {
 		pass: pass,
 	}
 
-	// Pre-fill the pool with nil connections to represent available capacity
+	// Pre-fill the pool with nil to represent free slots
 	for i := 0; i < size; i++ {
 		c.pool <- nil
 	}
-	
-	log.Printf("LDAP Connection pool initialized with %d workers.", size)
+
+	log.Printf("LDAP Connection pool initialized with %d potential connections.", size)
 	return c, nil
 }
 
-// Borrow retrieves a connection or dials a new one if necessary
 func (c *Client) Borrow() (*ldap.Conn, error) {
 	conn := <-c.pool
 
-	if conn == nil || conn.IsClosing() {
-		newConn, err := ldap.DialURL(c.url)
-		if err != nil {
-			return nil, err
-		}
-		err = newConn.Bind(c.user, c.pass)
-		if err != nil {
-			newConn.Close()
-			c.pool <- nil
-			return nil, err
-		}
-		return newConn, nil
+	// If we have a living connection, return it directly
+	if conn != nil && !conn.IsClosing() {
+		return conn, nil
 	}
-	return conn, nil
+
+	// Dead or nil – try to create a fresh one
+	newConn, err := ldap.DialURL(c.url)
+	if err != nil {
+		// IMPORTANT: put back a nil so the slot isn't lost
+		c.pool <- nil
+		return nil, err
+	}
+
+	err = newConn.Bind(c.user, c.pass)
+	if err != nil {
+		newConn.Close()
+		c.pool <- nil
+		return nil, err
+	}
+
+	return newConn, nil
 }
 
-// Return puts the connection back into the pool
 func (c *Client) Return(conn *ldap.Conn) {
-	c.pool <- conn
+	if conn != nil && !conn.IsClosing() {
+		c.pool <- conn
+	} else {
+		c.pool <- nil
+	}
 }
 
 func (c *Client) CloseAll() {

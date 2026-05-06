@@ -4,46 +4,58 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+
+	"github.com/nats-io/nats.go"
 	"tbam/internal/ldap"
 	"tbam/internal/models"
 	"tbam/internal/scheduler"
 	"tbam/internal/worker"
-
-	"github.com/nats-io/nats.go"
 )
 
 type NatsEnvelope struct {
-	RequestID string             `json:"requestId"`
+	RequestID string            `json:"requestId"`
 	Body      models.UserRequest `json:"body"`
 }
 
 func StartNatsListener(nc *nats.Conn, wPool *worker.Pool, ldapClient *ldap.Client) {
-	log.Println("✅ BRAIN IS ALIVE: Listening for JSON on 'access.grant'")
+	// ----- Start‑up recovery: re‑schedule any missed revocations -----
+	go func() {
+		grants, err := ldapClient.FetchExpiringGrants()
+		if err != nil {
+			log.Printf("ERROR fetching expiring grants on startup: %v", err)
+			return
+		}
+		for _, g := range grants {
+			scheduler.ScheduleNatsRevocation(g, ldapClient, nc)
+			log.Printf("Recovered grant: %s -> %s (expires %d)", g.UserDN, g.GroupDN, g.AccessExpiryTime)
+		}
+	}()
 
+	// Subscribe to incoming access requests
 	nc.Subscribe("access.grant", func(msg *nats.Msg) {
-		log.Printf("📥 RECEIVED RAW JSON: %s", string(msg.Data))
-
 		wPool.Submit(func() {
 			var env NatsEnvelope
 			if err := json.Unmarshal(msg.Data, &env); err != nil {
-				log.Printf("❌ JSON PARSE ERROR: %v", err)
+				log.Printf("Invalid JSON: %v", err)
+				reply, _ := json.Marshal(map[string]interface{}{"ok": false, "error": "invalid JSON"})
+				msg.Respond(reply)
 				return
 			}
 
 			grant, err := ldapClient.PrepareGrantCommand(env.Body)
 			if err != nil {
-				log.Printf("❌ GRANT PREP ERROR: %v", err)
+				reply, _ := json.Marshal(map[string]interface{}{"ok": false, "error": err.Error()})
+				msg.Respond(reply)
 				return
 			}
 
-			// Publish to Terminal 2
 			commandStr := fmt.Sprintf("CMD:GRANT|USER:%s|GRP:%s|EXP:%d", grant.UserDN, grant.GroupDN, grant.AccessExpiryTime)
 			nc.Publish("ldap.console.execute", []byte(commandStr))
-			log.Printf("📤 PUBLISHED TO HAND: CMD:GRANT for %s", env.Body.UID)
 
-			// Schedule the Revocation
 			scheduler.ScheduleNatsRevocation(*grant, ldapClient, nc)
-			log.Printf("⏱️ SCHEDULED REVOCATION: Set timer for %s %s", env.Body.EndDate, env.Body.EndTime)
+
+			reply, _ := json.Marshal(map[string]interface{}{"ok": true, "status": 200, "reqId": env.RequestID})
+			msg.Respond(reply)
 		})
 	})
 }
