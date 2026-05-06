@@ -14,45 +14,57 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-// 1. GIN HANDLER: This is what your friend hits
+// HandleProvisionTime is the Gin handler that receives the POST request from your friend.
 func HandleProvisionTime(nc *nats.Conn) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req models.UserRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
 			return
 		}
 
-		// Push the data into the NATS channel your friend requested
+		// Convert the request to bytes and publish to the NATS channel
 		data, _ := json.Marshal(req)
-		nc.Publish("events.provision.time", data)
+		err := nc.Publish("events.provision.time", data)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to queue request"})
+			return
+		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Event queued on events.provision.time"})
+		c.JSON(http.StatusOK, gin.H{"message": "Request received and queued on events.provision.time"})
 	}
 }
 
-// 2. NATS SUBSCRIBER: This listens to that channel and does the LDAP work
+// StartNatsListener subscribes to the NATS channel and processes the logic.
 func StartNatsListener(nc *nats.Conn, wPool *worker.Pool, ldapClient *ldap.Client) {
 	nc.Subscribe("events.provision.time", func(msg *nats.Msg) {
-		log.Printf("📥 Received from channel [events.provision.time]")
-		
+		log.Printf("📥 Received message on channel [events.provision.time]")
+
 		wPool.Submit(func() {
 			var req models.UserRequest
-			json.Unmarshal(msg.Data, &req)
-
-			// Your existing logic to prepare LDAP command
-			grant, err := ldapClient.PrepareGrantCommand(req)
-			if err != nil {
-				log.Printf("❌ Error: %v", err)
+			if err := json.Unmarshal(msg.Data, &req); err != nil {
+				log.Printf("❌ Failed to unmarshal NATS message: %v", err)
 				return
 			}
 
-			// Send command to the executor (Terminal 2)
-			commandStr := fmt.Sprintf("CMD:GRANT|USER:%s|GRP:%s|EXP:%d", grant.UserDN, grant.GroupDN, grant.AccessExpiryTime)
+			// 1. Prepare the grant 
+			// Note: Changed to GrantAccess to match your provision.go file
+			grant, err := ldapClient.GrantAccess(req)
+			if err != nil {
+				log.Printf("❌ LDAP Error: %v", err)
+				return
+			}
+
+			// 2. Publish to the console executor (Terminal 2)
+			// Note: Matches the field names in your models.AccessGrant struct
+			commandStr := fmt.Sprintf("CMD:GRANT|USER:%s|GRP:%s|EXP:%d", 
+				grant.UserDN, grant.GroupDN, grant.AccessExpiryTime)
 			nc.Publish("ldap.console.execute", []byte(commandStr))
 
-			// Start the auto-revocation timer
-			scheduler.ScheduleNatsRevocation(*grant, ldapClient, nc)
+			// 3. Schedule the auto-revocation
+			// Note: Ensure your scheduler.go signature is: 
+			// func ScheduleRevocations(grant models.AccessGrant, client *ldap.Client, nc *nats.Conn)
+			scheduler.ScheduleRevocations(*grant, ldapClient, nc)
 		})
 	})
 }

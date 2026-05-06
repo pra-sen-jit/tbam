@@ -6,41 +6,33 @@ import (
 
 	"tbam/internal/ldap"
 	"tbam/internal/models"
+	"github.com/nats-io/nats.go" // Added NATS import
 )
 
-// ScheduleRevocations takes a list of access grants and sets an in-memory timer for each one.
-func ScheduleRevocations(grants []models.AccessGrant, client *ldap.Client) {
-	log.Printf("Scheduling %d specific access revocations...", len(grants))
+// ScheduleRevocations now takes 3 arguments: a single grant, the client, and nats connection
+func ScheduleRevocations(grant models.AccessGrant, client *ldap.Client, nc *nats.Conn) {
+	// 1. Calculate time remaining
+	expiryTime := time.Unix(grant.AccessExpiryTime, 0)
+	timeRemaining := time.Until(expiryTime)
 
-	for _, grant := range grants {
-		// 1. Convert the raw Unix integer into a Go time.Time object
-		expiryTime := time.Unix(grant.AccessExpiryTime, 0)
-		
-		// 2. Calculate exactly how much time is left from 'Right Now'
-		timeRemaining := time.Until(expiryTime)
-
-		// Capture the specific grant for the goroutine closure to prevent data races
-		targetGrant := grant
-
-		// 3. Handle edge cases: What if the access is already expired?
-		if timeRemaining <= 0 {
-			log.Printf("[URGENT] Grant for %s to group %s is already expired! Flagging for immediate revocation.", targetGrant.UserDN, targetGrant.GroupDN)
-			err := client.RevokeSpecificAccess(targetGrant)
-			if err != nil {
-				log.Printf("❌ ERROR revoking specific access for %s: %v", targetGrant.UserDN, err)
-			}
-			continue
-		}
-
-		log.Printf("Timer set: %s will be removed from %s in %v", targetGrant.UserDN, targetGrant.GroupDN, timeRemaining)
-
-		// 4. Set the Alarm
-		time.AfterFunc(timeRemaining, func() {
-			log.Printf("⏰ ALARM RINGING! Time to revoke access for: %s from %s", targetGrant.UserDN, targetGrant.GroupDN)
-			err := client.RevokeSpecificAccess(targetGrant)
-			if err != nil {
-				log.Printf("❌ ERROR revoking specific access for %s: %v", targetGrant.UserDN, err)
-			}
-		})
+	if timeRemaining <= 0 {
+		log.Printf("[URGENT] Already expired: %s", grant.UserDN)
+		executeRevocation(grant, nc)
+		return
 	}
+
+	log.Printf("⏰ Timer set for %s: Revoking in %v", grant.UserDN, timeRemaining)
+
+	// 2. Set the Alarm
+	time.AfterFunc(timeRemaining, func() {
+		log.Printf("🚨 ALARM: Revoking access for %s", grant.UserDN)
+		executeRevocation(grant, nc)
+	})
+}
+
+// Helper to notify the system to revoke via NATS
+func executeRevocation(grant models.AccessGrant, nc *nats.Conn) {
+	// You can publish to a 'revoke' channel that Terminal 2 listens to
+	revokeMsg := fmt.Sprintf("CMD:REVOKE|USER:%s|GRP:%s", grant.UserDN, grant.GroupDN)
+	nc.Publish("ldap.console.execute", []byte(revokeMsg))
 }
