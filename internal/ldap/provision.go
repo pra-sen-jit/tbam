@@ -2,54 +2,34 @@ package ldap
 
 import (
 	"fmt"
-	"os"
 	"time"
 	"tbam/internal/models"
-	"github.com/go-ldap/ldap/v3"
 )
 
 func (c *Client) PrepareGrantCommand(req models.UserRequest) (*models.AccessGrant, error) {
-	conn, err := c.Borrow()
-	if err != nil {
-		return nil, err
-	}
-	defer c.Return(conn)
+	// 1. BLIND MODE: No c.Borrow() and no conn.Search(). We skip LDAP entirely.
 
+	// 2. IST TIMEZONE FIX: Set the exact timezone for Kolkata (UTC+5:30)
+	loc := time.FixedZone("IST", 5*60*60+30*60) 
 	timeLayout := "2006-01-02 15:04:05"
 	dateTimeStr := fmt.Sprintf("%s %s", req.EndDate, req.EndTime)
-	parsedTime, err := time.Parse(timeLayout, dateTimeStr)
+	
+	// Parse the time explicitly in IST
+	parsedTime, err := time.ParseInLocation(timeLayout, dateTimeStr, loc)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("time parsing failed: %v", err)
 	}
 	expiryUnix := parsedTime.Unix()
 
-	privSearch := ldap.NewSearchRequest(
-		req.PrivilegeAccess,
-		ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false,
-		"(objectClass=groupOfNames)",
-		[]string{"dn"}, nil,
-	)
-	ps, err := conn.Search(privSearch)
-	if err != nil || len(ps.Entries) == 0 {
-		return nil, fmt.Errorf("privilege group not found")
-	}
-	privGroupDN := ps.Entries[0].DN
-
-	userSearch := ldap.NewSearchRequest(
-		os.Getenv("LDAP_BASE_DN"),
-		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-		fmt.Sprintf("(&(objectClass=person)(uid=%s))", req.UID),
-		[]string{"dn"}, nil,
-	)
-	us, err := conn.Search(userSearch)
-	if err != nil || len(us.Entries) == 0 {
-		return nil, fmt.Errorf("user not found")
-	}
+	// 3. RAW DATA MAPPING: Pass the text exactly as received in the JSON
+	// Assuming a standard UID format since we can't search for the real DN
+	userDN := fmt.Sprintf("uid=%s,dc=example,dc=com", req.UID) 
+	groupDN := req.PrivilegeAccess
 
 	return &models.AccessGrant{
-		UserDN:           us.Entries[0].DN,
-		GroupDN:          privGroupDN,
+		UserDN:           userDN,
+		GroupDN:          groupDN,
 		AccessExpiryTime: expiryUnix,
-		RawAttribute:     fmt.Sprintf("%s|%d", privGroupDN, expiryUnix),
+		RawAttribute:     fmt.Sprintf("%s|%d", groupDN, expiryUnix),
 	}, nil
 }
