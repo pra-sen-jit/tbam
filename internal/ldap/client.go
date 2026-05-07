@@ -14,12 +14,10 @@ type Client struct {
 	pass string
 }
 
-// InitPool creates a connection pool of the specified size
 func InitPool(size int) (*Client, error) {
 	url := os.Getenv("LDAP_URL")
 	user := os.Getenv("LDAP_BIND_DN")
 	pass := os.Getenv("LDAP_PASSWORD")
-
 	c := &Client{
 		pool: make(chan *ldap.Conn, size),
 		url:  url,
@@ -27,16 +25,13 @@ func InitPool(size int) (*Client, error) {
 		pass: pass,
 	}
 
-	// Pre-fill the pool with nil connections to represent available capacity
 	for i := 0; i < size; i++ {
 		c.pool <- nil
 	}
-	
 	log.Printf("LDAP Connection pool initialized with %d workers.", size)
 	return c, nil
 }
 
-// Borrow retrieves a connection or dials a new one if necessary
 func (c *Client) Borrow() (*ldap.Conn, error) {
 	conn := <-c.pool
 
@@ -56,7 +51,6 @@ func (c *Client) Borrow() (*ldap.Conn, error) {
 	return conn, nil
 }
 
-// Return puts the connection back into the pool
 func (c *Client) Return(conn *ldap.Conn) {
 	c.pool <- conn
 }

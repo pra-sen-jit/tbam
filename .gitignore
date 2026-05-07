@@ -10,6 +10,7 @@
 
 # Build binary, built with `go build -o`
 tbam
+tbam-aws
 
 # Code coverage profiles and other test artifacts
 *.out

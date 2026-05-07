@@ -21,7 +21,7 @@ func NewPool(workerCount, queueSize int) *Pool {
 
 func (p *Pool) startWorker() {
 	for task := range p.taskQueue {
-		task() // Execute the task
+		task()
 	}
 }
 

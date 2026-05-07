@@ -1,44 +1,62 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
-
-	"github.com/gin-gonic/gin"
 	"tbam/internal/ldap"
 	"tbam/internal/models"
 	"tbam/internal/scheduler"
 	"tbam/internal/worker"
+
+	"github.com/gin-gonic/gin"
+	"github.com/nats-io/nats.go"
 )
 
-func StartServer(wPool *worker.Pool, ldapClient *ldap.Client) {
-	r := gin.Default()
-
-	r.POST("/provision", func(c *gin.Context) {
+func HandleProvisionTime(nc *nats.Conn) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		var req models.UserRequest
-
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
 			return
 		}
 
-		// Submit the heavy lifting to the background worker pool
+		js, err := nc.JetStream()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "JetStream not enabled"})
+			return
+		}
+
+		data, _ := json.Marshal(req)
+		_, err = js.Publish("events.provision.time", data)
+		if err != nil {
+			log.Printf("❌ JetStream Publish Error: %v", err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Persistence failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Request persisted in JetStream"})
+	}
+}
+
+func StartNatsListener(nc *nats.Conn, wPool *worker.Pool, ldapClient *ldap.Client) {
+	nc.Subscribe("events.provision.time", func(msg *nats.Msg) {
+		log.Printf("📥 Received from channel [events.provision.time]")
+		
 		wPool.Submit(func() {
-			// 1. Provision the Access in LDAP
-			grant, err := ldapClient.GrantAccess(req)
-			if err != nil {
-				fmt.Printf("❌ Failed to provision %s: %v\n", req.UID, err)
+			var req models.UserRequest
+			if err := json.Unmarshal(msg.Data, &req); err != nil {
+				log.Printf("❌ Error unmarshaling request: %v", err)
 				return
 			}
-
-			// 2. IMMEDIATELY SET THE DEPROVISIONING TIMER
-			// We pass a slice containing our single new grant to your existing scheduler
+			grant, err := ldapClient.GrantAccess(req)
+			if err != nil {
+				log.Printf("❌ Error provisioning access: %v", err)
+				return
+			}
+			commandStr := fmt.Sprintf("CMD:GRANT|USER:%s|GRP:%s|EXP:%d", grant.UserDN, grant.GroupDN, grant.AccessExpiryTime)
+			nc.Publish("ldap.console.execute", []byte(commandStr))
 			scheduler.ScheduleRevocations([]models.AccessGrant{*grant}, ldapClient)
 		})
-
-		// Return fast to the UI
-		c.JSON(http.StatusAccepted, gin.H{"status": "queued", "user": req.UID})
 	})
-
-	r.Run(":5000")
 }
