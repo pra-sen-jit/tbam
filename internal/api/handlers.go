@@ -17,6 +17,10 @@ import (
 func HandleProvisionTime(nc *nats.Conn) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req models.UserRequest
+		if size := c.Request.ContentLength; size == -1 || size > 25 * 1024 * 1024 {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "body too large"})
+				return
+		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format"})
 			return

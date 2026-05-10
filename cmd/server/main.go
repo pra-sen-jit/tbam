@@ -16,6 +16,22 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+func CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		// If it's a preflight OPTIONS request, abort with 204 (No Content) and return
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func main() {
 	godotenv.Load(".env")
 
@@ -47,6 +63,7 @@ func main() {
 	}
 
 	r := gin.Default()
+	r.Use(CORSMiddleware())
 	r.POST("/api/access/time", api.HandleProvisionTime(nc))
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "Server is reachable"})
