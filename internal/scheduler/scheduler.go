@@ -2,13 +2,14 @@ package scheduler
 
 import (
 	"log"
-	"time"
+	"tbam/internal/db"
 	"tbam/internal/ldap"
 	"tbam/internal/models"
+	"time"
 )
 
 // ScheduleRevocations takes a list of access grants and sets an in-memory timer for each one.
-func ScheduleRevocations(grants []models.AccessGrant, client *ldap.Client) {
+func ScheduleRevocations(grants []models.AccessGrant, client *ldap.Client, dbClient *db.DBClient) {
 	log.Printf("Scheduling %d specific access revocations...", len(grants))
 
 	for _, grant := range grants {
@@ -18,7 +19,7 @@ func ScheduleRevocations(grants []models.AccessGrant, client *ldap.Client) {
 
 		if timeRemaining <= 0 {
 			log.Printf("[URGENT] Grant for %s to group %s is already expired! Flagging for immediate revocation.", targetGrant.UserDN, targetGrant.GroupDN)
-			err := client.RevokeSpecificAccess(targetGrant)
+			err := client.RevokeSpecificAccess(targetGrant, dbClient)
 			if err != nil {
 				log.Printf("❌ ERROR revoking specific access for %s: %v", targetGrant.UserDN, err)
 			}
@@ -28,7 +29,7 @@ func ScheduleRevocations(grants []models.AccessGrant, client *ldap.Client) {
 
 		time.AfterFunc(timeRemaining, func() {
 			log.Printf("⏰ ALARM RINGING! Time to revoke access for: %s from %s", targetGrant.UserDN, targetGrant.GroupDN)
-			err := client.RevokeSpecificAccess(targetGrant)
+			err := client.RevokeSpecificAccess(targetGrant, dbClient)
 			if err != nil {
 				log.Printf("❌ ERROR revoking specific access for %s: %v", targetGrant.UserDN, err)
 			}

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"syscall"
 	"tbam/internal/api"
+	"tbam/internal/db"
 	"tbam/internal/ldap"
 	"tbam/internal/scheduler"
 	"tbam/internal/worker"
@@ -35,6 +36,12 @@ func CORSMiddleware() gin.HandlerFunc {
 func main() {
 	godotenv.Load(".env")
 
+	dbClient, err := db.InitMySQL()
+	if err != nil {
+		log.Fatalf("Failed to connect to MySQL: %v", err)
+	}
+	defer dbClient.Conn.Close()
+
 	ldapClient, err := ldap.InitPool(10)
 	if err != nil {
 		log.Fatalf("Failed to initialize LDAP pool: %v", err)
@@ -57,7 +64,7 @@ func main() {
 	if fetchErr != nil {
 		log.Printf("Error fetching access grants on boot: %v", fetchErr)
 	} else if len(grants) > 0 {
-		scheduler.ScheduleRevocations(grants, ldapClient)
+		scheduler.ScheduleRevocations(grants, ldapClient, dbClient)
 	} else {
 		log.Println("No active expirations found on boot.")
 	}
@@ -71,7 +78,7 @@ func main() {
 
 	// Starts the NATS Subscriber in a background Goroutine
 	// It listens to the "events.provision.time" channel
-	go api.StartNatsListener(nc, workerPool, ldapClient)
+	go api.StartNatsListener(nc, workerPool, ldapClient, dbClient)
 
 	go func() {
 		log.Println("🚀 Gin Server starting on 0.0.0.0:8080")

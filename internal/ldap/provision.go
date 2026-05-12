@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
+	"tbam/internal/db"
 	"tbam/internal/models"
+	"time"
 
 	"github.com/go-ldap/ldap/v3"
 )
 
 // GrantAccess provisions the LDAP group and sets the timer attribute
-func (c *Client) GrantAccess(req models.UserRequest) (*models.AccessGrant, error) {
+func (c *Client) GrantAccess(req models.UserRequest, dbClient *db.DBClient) (*models.AccessGrant, error) {
 	conn, err := c.Borrow()
 	if err != nil {
 		return nil, fmt.Errorf("failed to borrow connection: %w", err)
@@ -71,6 +72,7 @@ func (c *Client) GrantAccess(req models.UserRequest) (*models.AccessGrant, error
 		return nil, fmt.Errorf("failed to attach expiry timer to user: %w", err)
 	}
 	log.Printf("Provisioned %s into %s until %s", req.UID, req.PrivilegeAccess, dateTimeStr)
+	dbClient.LogEvent("GRANT", req.UID, privGroupDN, expiryUnix, "SUCCESS", grantString)
 
 	return &models.AccessGrant{
 		UserDN:           userDN,

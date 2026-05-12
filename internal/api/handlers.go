@@ -2,9 +2,9 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
+	"tbam/internal/db"
 	"tbam/internal/ldap"
 	"tbam/internal/models"
 	"tbam/internal/scheduler"
@@ -43,7 +43,7 @@ func HandleProvisionTime(nc *nats.Conn) gin.HandlerFunc {
 	}
 }
 
-func StartNatsListener(nc *nats.Conn, wPool *worker.Pool, ldapClient *ldap.Client) {
+func StartNatsListener(nc *nats.Conn, wPool *worker.Pool, ldapClient *ldap.Client, dbClient *db.DBClient) {
 	nc.Subscribe("events.provision.time", func(msg *nats.Msg) {
 		log.Printf("📥 Received from channel [events.provision.time]")
 		
@@ -53,14 +53,12 @@ func StartNatsListener(nc *nats.Conn, wPool *worker.Pool, ldapClient *ldap.Clien
 				log.Printf("❌ Error unmarshaling request: %v", err)
 				return
 			}
-			grant, err := ldapClient.GrantAccess(req)
+			grant, err := ldapClient.GrantAccess(req, dbClient)
 			if err != nil {
 				log.Printf("❌ Error provisioning access: %v", err)
 				return
 			}
-			commandStr := fmt.Sprintf("CMD:GRANT|USER:%s|GRP:%s|EXP:%d", grant.UserDN, grant.GroupDN, grant.AccessExpiryTime)
-			nc.Publish("ldap.console.execute", []byte(commandStr))
-			scheduler.ScheduleRevocations([]models.AccessGrant{*grant}, ldapClient)
+			scheduler.ScheduleRevocations([]models.AccessGrant{*grant}, ldapClient, dbClient)
 		})
 	})
 }
